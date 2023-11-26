@@ -1,54 +1,79 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.18;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+
 error ElectionPortal__LockTimeError(uint _lock_time);
 error ElectionPortal__CandidateAlreadyExist();
 error ElectionPortal__CandidateDoesntExist();
 error ElectionPortal__YouCantVoteTwice();
 
 
-contract ElectionPortal {
+contract ElectionPortal is Ownable {
 
     uint public lock_time; 
     uint256 public candidateCount;
     uint256 public voteCount;
+    uint8 public votingTypeCount;
 
-    struct Voting {
-        uint256 id;
-        address voter;
+    struct votingType {
+        uint8 id;
+        string position;
+    }
+
+    struct votingDetails {
+        uint id;
         string name;
+        address voter;
         address candidate;
-        string year;
         bool vote;
     }
+
+    /**struct votingRecordByCandidate {
+        uint vote_count;
+    }*/
+
+
 
     struct Candidate {
         uint256 id;
         address candidate;
         string name;
         uint256 vote_number;
-        bool isValue;
         string party;
-        string position;
+        uint8 position;
+        bool reEnter;
     }
 
     event RegisterEvent(
         uint256 indexed id,
         address indexed candidate,
-        string indexed name
+        string indexed name,
+        string party,
+        uint position
     );
+
+    event VotinTypeEvent(
+        uint8 indexed id,
+        string indexed position
+    );
+
 
     event VotingEvent(
         uint256 indexed id,
         address indexed voter,
         string name,
         address indexed candidate,
+        string year,
         bool vote
     );
 
 
-    mapping(uint256 => Voting) public s_election_data;
+    mapping (string => mapping (uint8 => mapping (address => votingDetails))) public s_election_data;
+    //mapping (string => mapping (uint8 => mapping (address => votingRecordByCandidate))) public s_candidate_data;
     mapping (address => Candidate) public s_candidates;
+    mapping (uint8 => votingType) public s_voting_type;
 
     modifier onlyFutureTime(
         uint _lock_time
@@ -63,7 +88,7 @@ contract ElectionPortal {
         address _candidate
     ){
         //Candidate memory candidate = s_candidates[id];
-       if(s_candidates[_candidate].isValue){
+       if(s_candidates[_candidate].reEnter){
             revert ElectionPortal__CandidateDoesntExist();
         }
         _;
@@ -73,40 +98,25 @@ contract ElectionPortal {
     modifier candidateAlreadyExist(
         address _candidate
     ){
-       if(s_candidates[_candidate].isValue){
+       if(s_candidates[_candidate].reEnter){
             revert ElectionPortal__CandidateAlreadyExist();
         }
         _;
     }
 
-   /** modifier cantVoteForTheSameCandidateTwice(
+    modifier cantVoteForTheSameCandidateTwice(
         address _candidate,
         address _voter,
-        string memory _year
+        string memory _year,
+        uint8 _position
     ) {
-        bool exist = getVotingRecord(_candidate, _voter, _year);
+        bool exist = s_election_data[_year][_position][_voter].vote;
         if(exist){
             revert ElectionPortal__YouCantVoteTwice();
         }
         _;
 
-    }**/
-
-    /**function getVotingRecord(
-        address _candidate, 
-        address _voter,
-        string memory _year
-    ) 
-    public
-    pure
-    returns (bool) {
-        for(uint i = 0; i < s_election_data[_candidate].length; i++) {
-            if(s_election_data[_candidate][i].voter == _voter){
-                return true;
-            }
-        }
-    }*/
-
+    }
 
 
     constructor(uint _lock_time) 
@@ -118,38 +128,61 @@ contract ElectionPortal {
 
     function registerCandidate(
         string memory _name,
-        string memory _position,
+        uint8 _position,
         string memory _party
     )
-        private 
+        public 
         candidateAlreadyExist(msg.sender)
     {
+        s_candidates[msg.sender] = Candidate(candidateCount, msg.sender, _name, 0, _party, _position, true);
+        emit RegisterEvent(candidateCount, msg.sender, _name, _party, _position);
         candidateCount++;
-        s_candidates[msg.sender] = Candidate(candidateCount, msg.sender, _name, 0, true, _party, _position);
-        emit RegisterEvent(candidateCount, msg.sender, _name);
     }
 
     function registerVote (
         string memory _name,
         address _candidate,
-        string memory _year
+        string memory _year,
+        uint8 _position
     ) 
-        private 
+        public 
         candidateDoesntExist(_candidate)
-        //cantVoteForTheSameCandidateTwice(_candidate, msg.sender, _year)
+        cantVoteForTheSameCandidateTwice(_candidate, msg.sender, _year, _position)
     {
-        voteCount++;
-        s_election_data[voteCount] = Voting(voteCount, msg.sender, _name, _candidate, _year, true);
+        s_election_data[_year][_position][msg.sender] = votingDetails(voteCount, _name,msg.sender, _candidate, true);
         s_candidates[_candidate].vote_number ++;
-        emit VotingEvent(voteCount, msg.sender, _name, _candidate, true);
+        emit VotingEvent(voteCount, msg.sender, _name, _candidate,_year, true);
+        voteCount++;
+    }
+
+    function addPosition(
+        string memory _position
+    ) 
+    public 
+    onlyOwner()
+    {
+        s_voting_type[votingTypeCount] = votingType(votingTypeCount, _position);
+        emit VotinTypeEvent(votingTypeCount, _position);
+        votingTypeCount++;
     }
 
     function getCandidateInformation(address _candidate) 
-        external 
+        public 
         view  
         returns(Candidate memory) {
         Candidate memory candidate = s_candidates[_candidate];
         return candidate;
+    }
+
+    function getVotingRecord(string memory _year, uint8 _position) public view returns(votingDetails memory) {
+        votingDetails memory voting_detail = s_election_data[_year][_position][msg.sender];
+        return voting_detail;
+    }
+
+
+    function getPostion(uint8 id) public view returns(votingType memory) {
+        votingType memory voting_type = s_voting_type[id];
+        return voting_type;
     }
 
 }
